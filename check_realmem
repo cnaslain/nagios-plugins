@@ -4,95 +4,126 @@
 #
 # Date: 2007-11-12
 # Author: Thomas Borger - ESG
+# Date: 2009-09-30
+# Modified : Daniel Roche - Lectra
 #
 # the memory check is done with following command line:
 # free -m | grep buffers/cache | awk '{ print $4 }'
 
 # get arguments
 
+VALWARN=""
+VALCRIT=""
+HELP=0
+PERF=0
+
 while getopts 'w:c:hp' OPT; do
   case $OPT in
-    w)  int_warn=$OPTARG;;
-    c)  int_crit=$OPTARG;;
-    h)  hlp="yes";;
-    p)  perform="yes";;
-    *)  unknown="yes";;
+    w)  VALWARN=$OPTARG;;
+    c)  VALCRIT=$OPTARG;;
+    h)  HELP=1;;
+    p)  PERF=1;;
+    *)  HELP=1;;
   esac
 done
 
 # usage
-HELP="
-    usage: $0 [ -w value -c value -p -h ]
+USAGE="
+ check linux real memory usage (do not count cache)
 
-    syntax:
-
-            -w --> Warning integer value
-            -c --> Critical integer value
-            -p --> print out performance data
-            -h --> print this help screen
+ usage: $0 [ -w value -c value -p -h ]
+ syntax:
+   -w INTEGER
+      exit with WARNING status if less than INTEGER megabyte of mem are free
+   -c INTEGER
+      exit with CRITICAL status if less than INTEGER megabyte of mem are free
+   -w PERCENT%
+      exit with WARNING status if less than PERCENT mem are free
+   -c PERCENT%
+      exit with CRITICAL status if less than PERCENT of mem are free
+   -p
+      print out performance data
+   -h
+      print this help screen
 "
 
-if [ "$hlp" = "yes" -o $# -lt 1 ]; then
-  echo "$HELP"
+if [ ${HELP} = 1 -o $# -lt 1 -o "${VALWARN}" = "" -o "${VALCRIT}" = "" ]; then
+  echo "${USAGE}"
   exit 0
 fi
 
-# get free memory
-FMEM=`free -m | grep buffers/cache | awk '{ print $4 }'`
+# get memory values
+set $(free -m)
+FMEM=${17}
+UMEM=${16}
+SMEM=${8}
 
-# output with or without performance data
-if [ "$perform" = "yes" ]; then
-  OUTPUTP="free system memory: $FMEM MB | free memory="$FMEM"MB;$int_warn;$int_crit;0"
+# transform percent eventually
+WPERC=$(expr "${VALWARN}" : '\([0-9]*\)%')
+if [ "${WPERC}" != "" ]
+then
+  V2WARN=$((SMEM * WPERC / 100))
 else
-  OUTPUT="free system memory: $FMEM MB"
+  V2WARN=${VALWARN}
+fi
+CPERC=$(expr "${VALCRIT}" : '\([0-9]*\)%')
+if [ "${CPERC}" != "" ]
+then
+  V2CRIT=$((SMEM * CPERC / 100))
+else
+  V2CRIT=${VALCRIT}
 fi
 
-if [ -n "$int_warn" -a -n "$int_crit" ]; then
+if [ ${V2WARN} -lt ${V2CRIT} ]
+then
+  echo "=== ERROR === : WARNING value must be > CRITICAL"
+  echo "${USAGE}"
+  exit 0
+fi
 
-  err=0
+#echo "total=$SMEM used=$UMEM free=$FMEM warn=$V2WARN crit=$V2CRIT"
+#exit 0
 
-  if (( $FMEM <= $int_warn )); then
-    err=1
-  elif (( $FMEM <= $int_crit )); then
-    err=2
+# output standard and performance data
+OUTPUTP=" | used=${UMEM}m size=${SMEM}m"
+OUTPUT="free system memory: ${FMEM} Mb"
+
+if [ -n "${V2WARN}" -a -n "${V2CRIT}" ]
+then
+
+  ERR=0
+
+  if [ ${FMEM} -le ${V2WARN} ]
+  then
+    ERR=1
+  fi
+  if [ ${FMEM} -le ${V2CRIT} ]
+  then
+    ERR=2
   fi
 
-  if (( $err == 0 )); then
-
-    if [ "$perform" = "yes" ]; then
-      echo "MEM OK - $OUTPUTP"
-      exit "$err"
-    else
-      echo "MEM OK - $OUTPUT"
-      exit "$err"
-    fi
-
-  elif (( $err == 1 )); then
-    if [ "$perform" = "yes" ]; then
-      echo "MEM WARNING - $OUTPUTP"
-      exit "$err"
-    else
-      echo "MEM WARNING - $OUTOUT"
-      exit "$err"
-    fi
-
-  elif (( $err == 2 )); then
-    
-    if [ "$perform" = "yes" ]; then
-      echo "MEM CRITICAL - $OUTPUTP"
-      exit "$err"
-    else
-      echo "MEM CRITICAL - $OUTPUT"
-      exit "$err"
-    fi
-
+  if [ ${ERR} -eq  0 ]
+  then
+    echo -n "OK - ${OUTPUT}"
+  elif [ ${ERR} -eq 1 ]
+  then
+    echo -n "WARNING - ${OUTPUT}"
+  elif [ ${ERR} -eq 2 ]
+  then
+    echo -n "CRITICAL - ${OUTPUT}"
   fi
-  
+  if [ $PERF -eq 1 ]
+  then
+    echo ${OUTPUTP}
+  else
+    echo ""
+  fi
+  exit ${ERR}
+
 else
-  
+
   echo "no output from plugin"
   exit 3
 
 fi
-exit  
-
+exit
